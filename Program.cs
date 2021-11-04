@@ -8,6 +8,7 @@ namespace ChatIP
 {
     static class Program
     {
+        public static string status = "";
         /// <summary>
         ///  The main entry point for the application.
         /// </summary>

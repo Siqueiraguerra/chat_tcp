@@ -18,54 +18,75 @@ namespace ChatIP
             InitializeComponent();
         }
 
-        SimpleTcpClient client;
+        SimpleTcpServer server;
 
-        private void btConnect_Click(object sender, EventArgs e)
+        private void btStart_Click(object sender, EventArgs e)
         {
-            //conecta o cliente com o servidor
-            try
-            {
-                client.Connect();
-                btSend.Enabled = true;
-                btConnect.Enabled = false;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            // Evento para iniciar o servidor TCP
+            txtInfo.Text += $"Iniciando Servidor...{Environment.NewLine}";
+            server.Start();
+            btStart.Enabled = false;
+            btSend.Enabled = true;
+            txtInfo.Text += $"Servidor Iniciado.{Environment.NewLine}";
         }
 
-        private void btDisconnect_Click(object sender, EventArgs e)
+        private void Form1_Load(object sender, EventArgs e)
         {
-            //Desconecta o cliente do servidor
-            if (client.IsConnected)
+            // Inicia o servidor e cria os event handlers
+            btSend.Enabled = false;
+            server = new SimpleTcpServer(txtIP.Text);
+            server.Events.ClientConnected += Events_ClientConnected;
+            server.Events.ClientDisconnected += Events_ClientDisconnected;
+            server.Events.DataReceived += Events_DataReceived;
+        }
+
+        private void Events_DataReceived(object sender, DataReceivedEventArgs e)
+        {
+            // Dados recebidos pelo servidor, ele replica para todos os clientes
+            this.Invoke((MethodInvoker)delegate
             {
-                try
+                string message = Encoding.UTF8.GetString(e.Data);
+                txtInfo.Text += $"{e.IpPort} {GetFormattedTimestamp()}: {message}{Environment.NewLine}";
+
+                foreach (var item in lstClientIP.Items)
                 {
-                    client.Disconnect();
-                    btSend.Enabled = false;
-                    btConnect.Enabled = true;
+                    if (item.ToString() != e.IpPort)
+                        server.Send(item.ToString(), $"{e.IpPort}¨{message}");
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(ex.Message, "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-            else {
-                    MessageBox.Show("Precisa estar conectado para desconectar.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+            });
+        }
+
+        private void Events_ClientDisconnected(object sender, ClientDisconnectedEventArgs e)
+        {
+            // Quando um cliente é desconectado, ele é removido da lista de IPs conectados
+            this.Invoke((MethodInvoker)delegate
+            {
+                txtInfo.Text += $"{e.IpPort} Desconectado.{Environment.NewLine}";
+                lstClientIP.Items.Remove(e.IpPort);
+            });
+        }
+
+        private void Events_ClientConnected(object sender, ClientConnectedEventArgs e)
+        {
+            // Quando um cliente é conectado, ele é inserido na lista de IPs conectados
+            this.Invoke((MethodInvoker)delegate
+            {
+                txtInfo.Text += $"{e.IpPort} Conectado.{Environment.NewLine}";
+                lstClientIP.Items.Add(e.IpPort);
+            });
         }
 
         private void btSend_Click(object sender, EventArgs e)
         {
-            //Envia a mensagem para o servidor e ele propaga para todos os clientes
-            if (client.IsConnected)
+            // Quando o servidor envia uma mensagem, ele envia para todos os clientes
+            if (server.IsListening)
             {
                 if (!string.IsNullOrEmpty(txtMessage.Text))
                 {
-                    client.Send(txtMessage.Text);
-                    txtInfo.Text += $"Eu {GetFormattedTimestamp()}: {txtMessage.Text}{Environment.NewLine}";
-                    txtInfo.Text += string.Empty;
+                    foreach (var item in lstClientIP.Items)
+                        server.Send(item.ToString(), $"Servidor¨{txtMessage.Text}");
+
+                    txtInfo.Text += $"Servidor {GetFormattedTimestamp()}: {txtMessage.Text}{Environment.NewLine}";
                     txtMessage.Text = string.Empty;
                 }
                 else
@@ -75,51 +96,27 @@ namespace ChatIP
             }
             else
             {
-                MessageBox.Show("Algo deu errado ao se comunicar com o servidor.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Algo deu errado ao se comunicar com os clientes conectados.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }
-
-        private void Form1_Load(object sender, EventArgs e)
-        {
-            // cria um novo cliente e os event handlers
-            client = new SimpleTcpClient(txtIP.Text);
-            client.Events.Connected += Events_Connected;
-            client.Events.DataReceived += Events_DataReceived;
-            client.Events.Disconnected += Events_Disconnected;
-            btSend.Enabled = false;
-        }
-
-        private void Events_Disconnected(object sender, ClientDisconnectedEventArgs e)
-        {
-            // dispara um aviso caso esse cliente seja desconectado do servidor
-            this.Invoke((MethodInvoker)delegate
-            {
-                txtInfo.Text += $"Servidor Desconectado.{Environment.NewLine}";
-                btConnect.Enabled = true;
-            });
-        }
-
-        private void Events_DataReceived(object sender, DataReceivedEventArgs e)
-        {
-            // quando esse cliente recebe dados do servidor
-            this.Invoke((MethodInvoker)delegate
-            {
-                string[] receivedData = Encoding.UTF8.GetString(e.Data).Split("¨");
-                txtInfo.Text += $"{receivedData[0]} {GetFormattedTimestamp()}: {receivedData[1]}{Environment.NewLine}";
-            });
-        }
-
-        private void Events_Connected(object sender, ClientConnectedEventArgs e)
-        {
-            // quando é conectado com o servidor
-            this.Invoke((MethodInvoker)delegate
-            {
-                txtInfo.Text += $"Servidor Conectado.{Environment.NewLine}";
-            });
         }
 
         // metodo que gera um timestamp do dia e hora, só pra ficar mais parecido com um chat
         private string GetFormattedTimestamp() => $"em {DateTime.Now:dd/MM} ás {DateTime.Now:HH:mm}";
 
+        private void btDisconnectClient_Click(object sender, EventArgs e)
+        {
+            // Quando o servidor vai desconectar um cliente
+            // ele remove o cliente da lista de IPs conectados
+            if(lstClientIP.SelectedItem != null)
+            {
+                string itemIpSelected = lstClientIP.SelectedItem.ToString();
+                server.DisconnectClient(itemIpSelected);
+                lstClientIP.Items.Remove(itemIpSelected);
+            }
+            else
+            {
+                MessageBox.Show("Selecione um cliente para desconectar.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
     }
 }
